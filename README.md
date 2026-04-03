@@ -8,7 +8,7 @@ It adds:
 - a reusable `/deliberate` skill
 - Codex MCP wiring for Claude Code
 - a shared toggle for enabling or disabling auto-deliberation
-- project-local permission rules for this workspace
+- shared project permission rules for this workspace
 
 The goal is simple: keep the source of truth in this repo, then symlink the
 live Claude home files back to it so the setup is easy to share, version, and
@@ -34,7 +34,7 @@ claude-home/
   hooks/auto-deliberate-on-plan.js
   skills/deliberate/SKILL.md
 
-.claude/settings.local.json       # Project-local permissions for this repo
+.claude/settings.json             # Shared project permissions for this repo
 scripts/install-claude-home-links.sh
 README.md
 ```
@@ -47,7 +47,7 @@ Shared in this repo:
 - [claude-home/deliberate/config.json](./claude-home/deliberate/config.json)
 - [claude-home/hooks/auto-deliberate-on-plan.js](./claude-home/hooks/auto-deliberate-on-plan.js)
 - [claude-home/skills/deliberate/SKILL.md](./claude-home/skills/deliberate/SKILL.md)
-- [.claude/settings.local.json](./.claude/settings.local.json)
+- [.claude/settings.json](./.claude/settings.json)
 
 Local on each machine:
 
