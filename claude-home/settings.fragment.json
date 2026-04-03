@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "codex": {
+      "command": "codex",
+      "args": [
+        "mcp-server"
+      ],
+      "env": {}
+    }
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.claude/hooks/auto-deliberate-on-plan.js\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
