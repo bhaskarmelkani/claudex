@@ -5,7 +5,11 @@
       "mcp__codex__codex",
       "mcp__codex__codex-reply",
       "Bash(codex:*)",
-      "Bash(codex exec:*)"
+      "Bash(codex exec:*)",
+      "Bash(mkdir -p ~/.claude/deliberations*)",
+      "Bash(python3 -c *)",
+      "Write(/Users/bhaskar.melkani/.claude/deliberations/*)",
+      "SendMessage"
     ]
   }
 }
