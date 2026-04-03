@@ -1,7 +1,4 @@
 const fs = require("fs");
-const path = require("path");
-
-const CONFIG_PATH = path.join(process.env.HOME || "", ".claude", "deliberate", "config.json");
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -24,12 +21,15 @@ function safeJsonParse(value, fallback) {
 }
 
 function loadConfig() {
-  try {
-    const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-    return safeJsonParse(raw, { auto_on_plan: true });
-  } catch {
-    return { auto_on_plan: true };
-  }
+  const autoOnPlan = (process.env.CLAUDE_PLUGIN_OPTION_AUTO_ON_PLAN || "true").toLowerCase();
+  const enableTeams = (process.env.CLAUDE_PLUGIN_OPTION_ENABLE_TEAMS || "true").toLowerCase();
+  const maxSpecialists = parseInt(process.env.CLAUDE_PLUGIN_OPTION_MAX_SPECIALISTS_PER_SIDE || "3", 10);
+
+  return {
+    auto_on_plan: autoOnPlan !== "false",
+    enable_teams: enableTeams !== "false",
+    max_specialists_per_side: isNaN(maxSpecialists) ? 3 : maxSpecialists
+  };
 }
 
 function getPrompt(input) {
@@ -79,7 +79,7 @@ function looksVague(topic) {
   return words.length < 6;
 }
 
-function buildInstruction(topic, vague) {
+function buildInstruction(topic, vague, config) {
   const topicLine = topic
     ? `The /plan topic is: "${topic}".`
     : "The user entered /plan without a topic.";
@@ -88,10 +88,10 @@ function buildInstruction(topic, vague) {
     ? "Before using Codex, ask exactly one clarifying question to narrow the decision. Suggest a more focused version if helpful."
     : "The topic is specific enough to start without a clarifying question.";
 
-  return [
+  const lines = [
     "Auto-deliberation is enabled for /plan.",
     topicLine,
-    "Handle this plan-mode request using the installed `deliberate` workflow.",
+    "Handle this plan-mode request using the installed `claudex:deliberate` workflow.",
     clarifyLine,
     "Scope: technical decision-making only, not code generation.",
     "The primary deliverable is a high-quality plan, not a debate transcript.",
@@ -108,7 +108,19 @@ function buildInstruction(topic, vague) {
     "Summarize the deliberation briefly. Do not dump the full transcript into the main response unless the user asks for it.",
     "Do not let log writing block the main response. If write approval interrupts logging, still deliver the final plan first and treat log persistence as secondary.",
     "End with either a converged final plan or numbered tie-break options for unresolved disagreements."
-  ].join("\n");
+  ];
+
+  if (config.enable_teams) {
+    lines.push(
+      "Before the main deliberation rounds, run an Intent Clarification phase: 1-2 fast micro-rounds with Codex to refine the problem statement and identify 2-3 expertise areas per side.",
+      `If agent teams are available (TeamCreate tool works), run a Team Assembly phase: use TeamCreate to spawn Claude specialist teammates, and instruct Codex to activate subagents for the identified expertise areas. Cap at ${config.max_specialists_per_side} specialists per side.`,
+      "During deliberation rounds, incorporate team/subagent findings in a 'Team Input' subsection. Attribute insights to specific specialists.",
+      "After the final plan, clean up teams with TeamDelete. If cleanup fails, deliver the plan anyway.",
+      "If team creation fails for any reason, fall back gracefully to standard 1-on-1 deliberation without interrupting the user."
+    );
+  }
+
+  return lines.join("\n");
 }
 
 async function main() {
@@ -126,7 +138,7 @@ async function main() {
   const output = {
     hookSpecificOutput: {
       hookEventName: "UserPromptSubmit",
-      additionalContext: buildInstruction(topic, looksVague(topic))
+      additionalContext: buildInstruction(topic, looksVague(topic), config)
     }
   };
 

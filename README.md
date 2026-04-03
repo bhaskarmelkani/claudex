@@ -1,139 +1,152 @@
 # Claudex
 
-This repo packages a shareable Claude Code setup for multi-AI deliberation.
+A Claude Code plugin for multi-AI deliberation between Claude and Codex.
 
-It adds:
-
-- automatic deliberation on `/plan ...`
-- a reusable `/deliberate` skill
-- Codex MCP wiring for Claude Code
-- a shared toggle for enabling or disabling auto-deliberation
-- shared project permission rules for this workspace
-
-The goal is simple: keep the source of truth in this repo, then symlink the
-live Claude home files back to it so the setup is easy to share, version, and
-update.
-
-## What This Does
-
-When installed and enabled:
-
-- `/plan some technical decision` still enters Claude plan mode normally
-- a `UserPromptSubmit` hook injects the deliberate workflow automatically
-- Claude uses Codex as a second reviewer to improve the plan quality
-- the visible answer stays plan-first, not transcript-first
-
-Manual `/deliberate ...` remains available as a fallback.
-
-## Repo Layout
-
-```text
-claude-home/
-  settings.fragment.json          # Global Claude settings to merge into ~/.claude/settings.json
-  deliberate/config.json          # Shared toggle config
-  hooks/auto-deliberate-on-plan.js
-  skills/deliberate/SKILL.md
-
-.claude/settings.json             # Shared project permissions for this repo
-scripts/install-claude-home-links.sh
-README.md
-```
-
-## What Is Shared vs Local
-
-Shared in this repo:
-
-- [claude-home/settings.fragment.json](./claude-home/settings.fragment.json)
-- [claude-home/deliberate/config.json](./claude-home/deliberate/config.json)
-- [claude-home/hooks/auto-deliberate-on-plan.js](./claude-home/hooks/auto-deliberate-on-plan.js)
-- [claude-home/skills/deliberate/SKILL.md](./claude-home/skills/deliberate/SKILL.md)
-- [.claude/settings.json](./.claude/settings.json)
-
-Local on each machine:
-
-- `~/.claude/settings.json`
-- `~/.claude/hooks/auto-deliberate-on-plan.js` -> symlink to this repo
-- `~/.claude/skills/deliberate/SKILL.md` -> symlink to this repo
-- `~/.claude/deliberate/config.json` -> symlink to this repo
-- `~/.claude/deliberations/` for generated logs
-
-## Prerequisites
-
-Before installing, each teammate should have:
-
-- Claude Code installed
-- Codex CLI installed and available as `codex`
-- Codex authenticated locally
+When you enter `/plan`, Claude and Codex debate your technical decision from
+independent perspectives, optionally bringing specialist agent teams for deeper
+analysis. The result is a higher-quality plan, not just one AI's opinion.
 
 ## Install
 
-Clone the repo, then run:
+```
+/plugin install bhaskar-melkani/claude-codex
+```
+
+That's it. The plugin registers everything automatically:
+
+- The `/claudex:deliberate` skill
+- Codex MCP server wiring
+- Auto-deliberation hook on `/plan`
+- Specialist agent definitions (security, performance, DX)
+- Codex subagent templates (copied to `~/.codex/agents/` on first session)
+
+### Enable Agent Teams (optional)
+
+For team-enhanced deliberation with specialist agents on both sides:
 
 ```bash
-bash scripts/install-claude-home-links.sh
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 ```
 
-The installer will:
+Add this to your shell profile to persist it. Without this, deliberation still
+works in classic 1-on-1 mode.
 
-1. create or update these symlinks:
-   - `~/.claude/hooks/auto-deliberate-on-plan.js`
-   - `~/.claude/skills/deliberate/SKILL.md`
-   - `~/.claude/deliberate/config.json`
-2. merge [claude-home/settings.fragment.json](./claude-home/settings.fragment.json)
-   into `~/.claude/settings.json`
-3. preserve any replaced local files as `*.bak.<timestamp>`
+### Prerequisites
 
-Restart Claude Code after installation.
+- [Claude Code](https://code.claude.com) installed
+- [Codex CLI](https://github.com/openai/codex) installed as `codex` and authenticated
 
-## Toggle Auto Deliberation
+## Usage
 
-Edit [claude-home/deliberate/config.json](./claude-home/deliberate/config.json):
+### Automatic (on /plan)
 
-```json
-{
-  "auto_on_plan": true
-}
+```
+/plan should we migrate from REST to GraphQL for our internal API?
 ```
 
-Set `auto_on_plan` to `false` to disable the `/plan` auto-activation behavior.
+The hook detects `/plan` and triggers the deliberation workflow automatically.
+Claude and Codex debate in structured rounds, then deliver a plan-first answer.
 
-Because the live Claude config is symlinked back to this repo, changing this
-file updates the installed setup too.
+### Manual
 
-## Verify The Setup
-
-After restart, run:
-
-```text
-/plan should we migrate from REST to GraphQL for a new internal API?
+```
+/claudex:deliberate should we use Prisma or Drizzle for a new service?
 ```
 
-Expected behavior:
+### Vague Topics
 
-- Claude enters plan mode normally
-- deliberation auto-activates without `/deliberate`
-- Codex is used as the second reviewer
-- the final answer is plan-first and concise
-
-Then run:
-
-```text
+```
 /plan auth
 ```
 
-Expected behavior:
+Claude asks one clarifying question before starting the deliberation.
 
-- Claude asks exactly one clarifying question before starting the deliberation
+## How It Works
 
-Optional manual fallback:
-
-```text
-/deliberate should we use Prisma or Drizzle for a new service?
+```
+Phase 1: Topic Setup            Parse topic, create log file
+Phase 2: Intent Clarification   1-2 micro-rounds to align on scope & expertise
+    |
+    Teams available?
+    |-- Yes --> Phase 3: Team Assembly (spawn specialists, collect findings)
+    '-- No  --> Skip to Phase 4
+    |
+Phase 4: Deliberation Rounds    2-5 rounds with structured positions
+Phase 5: Summary & Cleanup      Final plan, tie-breaking, team teardown
 ```
 
-## Notes
+Each round uses a structured format:
+- **Thesis**: One-sentence position
+- **Position**: Full argument with reasoning
+- **Team Input**: Specialist findings (when teams are active)
+- **Agrees With**: Points endorsed from the other side
+- **Challenges**: Specific disagreements
 
-- This repo currently packages the setup, but it is not itself a git repo yet.
-- Generated deliberation logs are intentionally not stored in this repo; they go
-  to `~/.claude/deliberations/`.
-- If Codex MCP is unavailable, the skill can fall back to Codex CLI.
+## Configuration
+
+Plugin settings are configured via userConfig at install time:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `auto_on_plan` | `true` | Auto-trigger deliberation on `/plan` |
+| `enable_teams` | `true` | Enable agent teams for specialist input |
+| `max_specialists_per_side` | `3` | Max specialist agents per side |
+
+## Repo Layout
+
+```
+.claude-plugin/
+  plugin.json              Plugin manifest
+.mcp.json                  Codex MCP server config
+skills/
+  deliberate/
+    SKILL.md               Full deliberation workflow (source of truth)
+agents/                    Claude specialist agent definitions
+  security-reviewer.md
+  performance-analyst.md
+  dx-reviewer.md
+hooks/
+  hooks.json               Hook declarations
+scripts/
+  auto-deliberate-on-plan.js   /plan detection + instruction injection
+  setup-codex-agents.sh        Copies Codex TOML agents on session start
+codex-agents/              Codex subagent templates
+  architecture-reviewer.toml
+  testing-strategist.toml
+  scalability-analyst.toml
+.claude/
+  settings.json            Project permissions
+```
+
+## Agent Teams
+
+When `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set and `enable_teams` is
+true, the deliberation gains two extra phases:
+
+**Intent Clarification**: Claude and Codex do 1-2 fast rounds to agree on what
+expertise is needed (e.g., "this topic needs security and performance analysis").
+
+**Team Assembly**: Each side spawns specialists:
+- **Claude** uses `TeamCreate` to spawn agent teammates (defined in `agents/`)
+- **Codex** activates subagents (from `codex-agents/*.toml`)
+
+Specialists provide focused analysis that feeds into the main deliberation
+rounds via "Team Input" sections. Teams are cleaned up after the final plan.
+
+If teams fail to spawn, the deliberation falls back to classic 1-on-1 mode.
+
+## Deliberation Logs
+
+Logs are saved to `~/.claude/deliberations/{date}-{slug}.md` with YAML
+frontmatter tracking topic, participants, rounds, thread IDs, and team status.
+
+## Updating
+
+The plugin updates when the source repository is updated. Claude Code handles
+plugin cache management automatically.
+
+## Uninstall
+
+```
+/plugin uninstall claudex
+```
