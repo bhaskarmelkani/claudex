@@ -197,8 +197,8 @@ mode:
    ```
    The partner starts up and waits. Do NOT send Round 1 yet — do that in Phase 2.
 
-6. Write the YAML frontmatter to the log file:
-   ```yaml
+6. Write the initial log file with frontmatter AND document title in one Write:
+   ```
    ---
    topic: "{topic}"
    date: {YYYY-MM-DD}
@@ -210,7 +210,18 @@ mode:
    rounds: 0
    project_context: {true/false}
    ---
+
+   # Deliberation: {topic}
+
+   {project_context_block_if_any}
    ```
+
+   Write this as a single atomic Write call. Never append the title or project
+   context separately — doing so places them at the wrong position in the file.
+
+   **Frontmatter updates** (during and after deliberation): Always rewrite the
+   entire frontmatter block as a single Edit that replaces the full `---...---`
+   section. Never append new YAML fields — they create duplicate keys.
 
 7. Print the start banner:
    ```
@@ -220,7 +231,7 @@ mode:
      Topic     : {topic}
      Claude    : Opus 4.6  (inline)
      Codex     : GPT-5.4-mini  (background partner)
-     Max rounds: 5  (min 2)
+     Max rounds: 3  (min 2, use --deep for 5)
      Log       : ~/.claude/deliberations/{filename}
 
    Both sides will be printed here as they respond.
@@ -231,7 +242,13 @@ mode:
 
 ## PHASE 2: Deliberation Rounds
 
-Run minimum **2 rounds**, maximum **5 rounds**.
+Run minimum **2 rounds**, maximum **3 rounds** by default.
+If the topic is complex or the user explicitly asks for a deeper deliberation,
+extend to 5 rounds. Announce this at the start banner if extending:
+`Max rounds: 5 (deep mode)`.
+
+Most topics converge in 2–3 rounds. Stopping at 3 by default saves ~2–4
+minutes compared to running to 5.
 
 ### Round structure
 
@@ -248,29 +265,37 @@ At the start of each round print:
 
 ### Claude's Turn
 
+**CRITICAL: Claude's position MUST be generated inline by you, in the main
+session. Do NOT spawn an Agent for Claude's turn. Do NOT delegate Claude's
+reasoning to a subagent. Spawning an agent for your own position is a
+protocol violation that breaks the deliberation.**
+
 Print the speaker header:
 ```
   ┌─ Claude ──────────────────────────────────────────────────
 ```
 
-Then write your position **inline** (the user sees it stream live):
+Then write your position **inline** (the user sees it stream live).
+
+**Keep positions tight** — verbosity adds latency without adding clarity.
+Hard limits per section:
 
 ```
-  │ **Thesis:** {one sentence stance}
+  │ **Thesis:** {1 sentence}
   │
-  │ ### Position
-  │ {full argument — concrete, specific, no hedging}
+  │ ### Position  (≤120 words)
+  │ {concrete argument — name tech, cite tradeoffs, give numbers}
   │
-  │ ### Agrees With
-  │ {Round 1: "N/A — first round"}
-  │ {Round 2+: what Codex said that convinced you}
+  │ ### Agrees With  (≤3 bullets, 1 line each)
+  │ {Round 1: "N/A"}
+  │ {Round 2+: specific points from Codex you now accept}
   │
-  │ ### Challenges
-  │ {Round 1: "N/A — first round"}
-  │ {Round 2+: what you still disagree with and why}
+  │ ### Challenges  (≤3 bullets, 2 lines each max)
+  │ {Round 1: "N/A"}
+  │ {Round 2+: what you still dispute and the crux of why}
   │
-  │ ### Delta  ← omit Round 1
-  │ {what changed from your last position and why}
+  │ ### Delta  (≤2 sentences — omit Round 1)
+  │ {what shifted and what moved you}
 ```
 
 Close with:
@@ -278,8 +303,9 @@ Close with:
   └───────────────────────────────────────────────────────────
 ```
 
-Append this full position (without the box characters) to the log file under
-`## Round {N} — Claude`.
+**Immediately after printing**, send the Codex partner the SendMessage for
+this round (start Codex's timer now), then write to the log file in parallel.
+Do NOT wait for the log write to finish before sending to Codex.
 
 ---
 
@@ -291,7 +317,8 @@ Print:
   │  (thinking...)
 ```
 
-**Round 1** — send the first message to the partner:
+**Round 1** — send the first message to the partner. Send this BEFORE writing
+to the log file so Codex starts thinking while you do I/O:
 ```
 SendMessage(
   to: "codex-partner",
@@ -299,7 +326,7 @@ SendMessage(
 )
 ```
 
-**Rounds 2+** — continue the thread:
+**Rounds 2+** — same: SendMessage first, log write second:
 ```
 SendMessage(
   to: "codex-partner",
@@ -391,23 +418,21 @@ IMPORTANT: Do NOT defer to Claude or agree for the sake of consensus.
 Disagree clearly when you see a better approach. If you simply echo Claude,
 this exercise is pointless and the user gets no value from two AIs.
 
-Use these exact headers:
+Be concise — long responses add latency. Use these exact headers with limits:
 
-**Thesis:** [One sentence summarizing your position]
+**Thesis:** [1 sentence]
 
-### Position
-[Full argument — name technologies, cite tradeoffs, give numbers. Concrete
-and actionable.]
+### Position  (≤120 words)
+[Concrete argument — name technologies, cite tradeoffs, give numbers.]
 
-### Agrees With
-[Points from Claude's position you genuinely endorse, with brief reasoning]
+### Agrees With  (≤3 bullets, 1 line each)
+[Points from Claude's position you genuinely endorse.]
 
-### Challenges
+### Challenges  (≤3 bullets, 2 lines each)
 [Points you disagree with — what you'd do differently and why. Leave empty
 ONLY if you genuinely agree with everything after careful consideration.]
 
-Avoid vague hedging like "it depends" or "both have merits." Take a clear
-stance. Be specific.
+Take a clear stance. No hedging. Stay within the word limits.
 ```
 
 ### Round 2+ content (appended to SendMessage prompt)
@@ -592,10 +617,22 @@ Re-prompt the partner once: `"RETRY ROUND {N}: Your last response was malformed.
 Please respond again using exactly: Thesis / Position / Agrees With / Challenges.
 Original prompt was: {prompt}"`
 
-**Partner spawn fails**
-Fall back to per-round nested agents (old approach) — spawn a new
-`Agent("Round {N} — Codex")` each round. Note to user that the persistent
-partner couldn't be started.
+**Partner spawn fails / Codex MCP unavailable**
+The Codex MCP server is wired via `.mcp.json` in the claude-codex project.
+When running `/deliberate` from a different project, Codex MCP may not be
+available (the partner will complete immediately without being able to call
+`mcp__codex__codex`).
+
+In this case, fall back to per-round nested agents that impersonate Codex
+using Claude's reasoning — spawn `Agent("Round {N} — Codex perspective")`
+each round with instructions to argue the opposing view independently.
+Note to user:
+```
+  Note: Codex MCP is not available in this project. Using Claude-as-Codex
+  fallback — positions will be independent but not from actual GPT-5.4-mini.
+  To use real Codex, run /deliberate from the claude-codex project directory.
+```
+Set `codex_thread_id: "claude-fallback"` in the log frontmatter.
 
 **Rate limiting**
 Retry SendMessage with backoff: 5s, 15s, 30s. Notify user if 30s retry fails.

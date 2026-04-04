@@ -1,35 +1,27 @@
-const fs = require("fs");
+#!/usr/bin/env node
+/**
+ * Auto-deliberation hook for Claudex.
+ *
+ * Fires on two events:
+ *   UserPromptSubmit  — when the user runs /plan <topic>
+ *   PreToolUse        — when Claude is about to call EnterPlanMode (shift+tab)
+ *
+ * Injects deliberation context so Claude runs a fast Codex deliberation
+ * before producing a plan.
+ */
 
 function readStdin() {
   return new Promise((resolve) => {
     let data = "";
     process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => {
-      data += chunk;
-    });
+    process.stdin.on("data", (chunk) => { data += chunk; });
     process.stdin.on("end", () => resolve(data));
     process.stdin.resume();
   });
 }
 
-function safeJsonParse(value, fallback) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
-
-function loadConfig() {
-  const autoOnPlan = (process.env.CLAUDE_PLUGIN_OPTION_AUTO_ON_PLAN || "true").toLowerCase();
-  const enableTeams = (process.env.CLAUDE_PLUGIN_OPTION_ENABLE_TEAMS || "true").toLowerCase();
-  const maxSpecialists = parseInt(process.env.CLAUDE_PLUGIN_OPTION_MAX_SPECIALISTS_PER_SIDE || "3", 10);
-
-  return {
-    auto_on_plan: autoOnPlan !== "false",
-    enable_teams: enableTeams !== "false",
-    max_specialists_per_side: isNaN(maxSpecialists) ? 3 : maxSpecialists
-  };
+function safeJsonParse(raw, fallback) {
+  try { return JSON.parse(raw); } catch { return fallback; }
 }
 
 function getPrompt(input) {
@@ -44,92 +36,91 @@ function extractTopic(prompt) {
 
 function looksVague(topic) {
   if (!topic) return true;
-
-  const words = topic
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
-
+  const words = topic.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length <= 2) return true;
-
-  const decisionSignals = [
-    "vs",
-    "versus",
-    "should",
-    "use",
-    "migrate",
-    "migration",
-    "choose",
-    "between",
-    "tradeoff",
-    "tradeoffs",
-    "architecture",
-    "library",
-    "framework",
-    "api",
-    "database",
-    "infra",
-    "infrastructure",
-    "strategy"
+  const decisionWords = [
+    "vs", "versus", "should", "use", "migrate", "migration",
+    "choose", "between", "tradeoff", "tradeoffs", "architecture",
+    "library", "framework", "api", "database", "infra", "infrastructure", "strategy"
   ];
-
-  const hasDecisionSignal = words.some((word) => decisionSignals.includes(word));
-  if (hasDecisionSignal) return false;
-
+  if (words.some((w) => decisionWords.includes(w))) return false;
   return words.length < 6;
 }
 
-function buildInstruction(topic, vague, config) {
-  const topicLine = topic
-    ? `The /plan topic is: "${topic}".`
-    : "The user entered /plan without a topic.";
+/**
+ * Fast instruction injected when Claude enters plan mode (shift+tab).
+ * 2-round deliberation, very concise positions.
+ */
+function planModeContext() {
+  return `
+Before producing your plan, run a fast 2-round deliberation with Codex.
 
-  const clarifyLine = vague
-    ? "Before using Codex, ask exactly one clarifying question to narrow the decision. Suggest a more focused version if helpful."
-    : "The topic is specific enough to start without a clarifying question.";
+Protocol (keep it tight — this is plan mode, not a full deliberation):
+1. Spawn a background Agent named "codex-partner" using the Codex partner
+   prompt from the /deliberate skill. Use model gpt-5.4-mini, sandbox read-only.
+2. State Claude's position inline — Thesis (1 sentence) + Position (≤80 words)
+   + Challenges (≤2 bullets). No Agrees With or Delta in fast mode.
+3. SendMessage to "codex-partner" with Claude's position. Codex responds
+   with the same compact format.
+4. Run exactly 2 rounds unless positions fully converge after Round 1.
+5. After deliberation, produce the plan in this structure:
+   Summary / Recommended Approach / Implementation Shape / Risks
+   Lead with the plan — do not show the deliberation transcript unless asked.
 
-  const lines = [
-    "Auto-deliberation is enabled for /plan.",
-    topicLine,
-    "Handle this plan-mode request using the installed `claudex:deliberate` workflow.",
-    clarifyLine,
-    "Scope: technical decision-making only, not code generation.",
-    "The primary deliverable is a high-quality plan, not a debate transcript.",
-    "Use Codex to improve the decision quality, but keep the visible response plan-first and concise.",
-    "Run a multi-AI deliberation between Claude (facilitator) and Codex (independent reviewer).",
-    "Use 2-5 rounds, with a minimum of 2 rounds before convergence.",
-    "For Round 1, first state Claude's position in this structure: Thesis, Position, Agrees With, Challenges. Then call `mcp__codex__codex` with the topic plus Claude's position and strong anti-sycophancy developer instructions.",
-    "For Rounds 2+, call `mcp__codex__codex-reply` with the saved thread id and Claude's updated position.",
-    "Use semantic convergence, not string matching. If Codex fully agrees in Round 1, force Round 2 and explicitly ask for edge cases, scaling risks, cost implications, or alternatives.",
-    "If 3 consecutive rounds add no new points, stop the debate and escalate unresolved disagreements to the user instead of consuming more rounds.",
-    "Persist a deliberation log under `~/.claude/deliberations/` using a dated slug plus short random suffix. Save the Codex thread id in the log frontmatter for recovery.",
-    "If MCP fails, retry once when appropriate. If the thread is lost, restart Codex with a compressed summary of prior rounds. If MCP is unavailable, prefer CLI fallback that preserves continuity: `codex exec --json --skip-git-repo-check` for round 1, then `codex exec resume <thread_id> --json --skip-git-repo-check` for later rounds. Use `--ephemeral` only when stateless fallback is truly necessary.",
-    "For the final user-facing answer, use a clean Claude-style planning structure with these sections: Summary, Recommended Priority Order, Implementation Shape, Validation, Risks/Assumptions.",
-    "Summarize the deliberation briefly. Do not dump the full transcript into the main response unless the user asks for it.",
-    "Do not let log writing block the main response. If write approval interrupts logging, still deliver the final plan first and treat log persistence as secondary.",
-    "End with either a converged final plan or numbered tie-break options for unresolved disagreements."
-  ];
+The goal is a better plan, not a visible debate. Keep the whole process under 2 minutes.
+`.trim();
+}
 
-  if (config.enable_teams) {
-    lines.push(
-      "Before the main deliberation rounds, run an Intent Clarification phase: 1-2 fast micro-rounds with Codex to refine the problem statement and identify 2-3 expertise areas per side.",
-      `If agent teams are available (TeamCreate tool works), run a Team Assembly phase: use TeamCreate to spawn Claude specialist teammates, and instruct Codex to activate subagents for the identified expertise areas. Cap at ${config.max_specialists_per_side} specialists per side.`,
-      "During deliberation rounds, incorporate team/subagent findings in a 'Team Input' subsection. Attribute insights to specific specialists.",
-      "After the final plan, clean up teams with TeamDelete. If cleanup fails, deliver the plan anyway.",
-      "If team creation fails for any reason, fall back gracefully to standard 1-on-1 deliberation without interrupting the user."
-    );
-  }
+/**
+ * Full instruction injected when the user runs /plan <topic>.
+ */
+function planCommandContext(topic, vague) {
+  const clarify = vague
+    ? "The topic may be vague — ask one clarifying question if needed before starting."
+    : "Topic is specific — begin deliberation immediately.";
 
-  return lines.join("\n");
+  return `
+Auto-deliberation triggered for /plan: "${topic || "(no topic specified)"}"
+${clarify}
+
+Use the /deliberate skill protocol:
+  1. Spawn a background "codex-partner" agent (persistent across all rounds).
+     Use model gpt-5.4-mini, sandbox read-only.
+  2. Generate Claude's position inline — concise: Thesis + Position (≤120 words)
+     + Agrees With (≤3 bullets) + Challenges (≤3 bullets) + Delta (≤2 sentences).
+  3. SendMessage to the partner for each Codex round. The partner maintains
+     the Codex thread internally — no threadId passing needed.
+  4. Run 2-3 rounds. Check convergence semantically after each Codex response.
+  5. Produce the final plan: Summary / Priority Order / Implementation / Validation / Risks.
+
+The deliverable is the plan. Summarize the deliberation in 2-3 bullets at most.
+Do not dump the full transcript unless the user explicitly asks.
+`.trim();
 }
 
 async function main() {
-  const rawInput = await readStdin();
-  const input = safeJsonParse(rawInput || "{}", {});
-  const prompt = getPrompt(input);
-  const config = loadConfig();
+  const raw = await readStdin();
+  const input = safeJsonParse(raw || "{}", {});
 
-  if (!config.auto_on_plan || !/^\/plan(?:\s|$)/.test(prompt)) {
+  // Detect event type — PreToolUse sends tool_name in input
+  const isPlanModeEntry =
+    input?.tool_name === "EnterPlanMode" ||
+    input?.hook_event_name === "PreToolUse";
+
+  if (isPlanModeEntry) {
+    const output = {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: planModeContext()
+      }
+    };
+    process.stdout.write(JSON.stringify(output) + "\n");
+    return;
+  }
+
+  // UserPromptSubmit — only fire on /plan
+  const prompt = getPrompt(input);
+  if (!/^\/plan(?:\s|$)/.test(prompt)) {
     process.stdout.write("{}\n");
     return;
   }
@@ -138,13 +129,10 @@ async function main() {
   const output = {
     hookSpecificOutput: {
       hookEventName: "UserPromptSubmit",
-      additionalContext: buildInstruction(topic, looksVague(topic), config)
+      additionalContext: planCommandContext(topic, looksVague(topic))
     }
   };
-
-  process.stdout.write(`${JSON.stringify(output)}\n`);
+  process.stdout.write(JSON.stringify(output) + "\n");
 }
 
-main().catch(() => {
-  process.stdout.write("{}\n");
-});
+main().catch(() => process.stdout.write("{}\n"));
