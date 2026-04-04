@@ -108,12 +108,8 @@ async function main() {
     input?.hook_event_name === "PreToolUse";
 
   if (isPlanModeEntry) {
-    const output = {
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        additionalContext: planModeContext()
-      }
-    };
+    // PreToolUse: additionalContext goes at the top level (no hookSpecificOutput wrapper)
+    const output = { additionalContext: planModeContext() };
     process.stdout.write(JSON.stringify(output) + "\n");
     return;
   }

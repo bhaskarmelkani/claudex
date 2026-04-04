@@ -159,7 +159,14 @@ mode:
      ]
    }])
    ```
-   If "Refine topic", ask the user for the new wording and use that.
+   If "Refine topic", use `AskUserQuestion` again to ask for the refined wording:
+   ```
+   AskUserQuestion(questions: [{
+     question: "What's the specific angle or bottleneck you'd like to focus on? (e.g. parallelization, indexing strategy, multi-repo orchestration)",
+     header: "Refined topic"
+   }])
+   ```
+   Use the user's answer as the topic. Do NOT ask as plain text.
 
 3. **Project context injection**: Check for `CLAUDE.md`, `README.md`,
    `package.json`, or `.git` in the current directory. If found:
