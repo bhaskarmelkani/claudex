@@ -60,7 +60,15 @@ deliberation. Results are synthesized into a unified recommendation.
 /plan should we switch from Postgres to CockroachDB?
 ```
 
-The hook detects `/plan` and injects the deliberation workflow automatically.
+The hook detects `/plan` and injects the full deliberation workflow automatically.
+
+### Automatic on plan mode (shift+tab)
+
+Press **shift+tab** in Claude Code to enter plan mode. The hook fires immediately
+and injects a fast 2-round deliberation before Claude produces the plan — no
+extra command needed. Claude deliberates with Codex, then leads with the plan.
+The deliberation summary is shown in 2–3 bullets; the full transcript is hidden
+unless you ask.
 
 ---
 
@@ -73,7 +81,7 @@ The hook detects `/plan` and injects the deliberation workflow automatically.
   Topic     : Should we use Prisma or Drizzle for the new service?
   Claude    : Opus 4.6  (inline)
   Codex     : GPT-5.4-mini  (background partner)
-  Max rounds: 5  (min 2)
+  Max rounds: 3  (min 2)
   Log       : ~/.claude/deliberations/2026-04-03-prisma-vs-drizzle-a4f1.md
 ================================================================
 
@@ -241,7 +249,7 @@ codex-agents/              Codex subagent templates
   scalability-analyst.toml
 
 hooks/
-  hooks.json               Hook declarations (UserPromptSubmit, SessionStart)
+  hooks.json               Hook declarations (UserPromptSubmit, PreToolUse, SessionStart)
 
 scripts/
   setup-codex-agents.sh    Copies Codex TOML agents to ~/.codex/agents/ on start
@@ -250,16 +258,6 @@ scripts/
 .claude/
   settings.json            Project-level permissions (auto-approves deliberation writes)
 ```
-
----
-
-## Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `auto_on_plan` | `true` | Auto-trigger deliberation on `/plan` |
-| `enable_teams` | `true` | Enable agent teams for `/council` |
-| `max_specialists_per_side` | `3` | Max specialist agents per track |
 
 ---
 

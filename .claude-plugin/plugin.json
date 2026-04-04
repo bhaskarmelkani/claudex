@@ -1,6 +1,5 @@
 {
   "name": "claudex",
-  "version": "1.0.0",
   "description": "Multi-AI deliberation between Claude and Codex with agent teams for richer technical decision-making",
   "author": {
     "name": "Bhaskar Melkani"
@@ -14,18 +13,5 @@
   "hooks": "./hooks/hooks.json",
   "mcpServers": "./.mcp.json",
 
-  "userConfig": {
-    "auto_on_plan": {
-      "description": "Automatically trigger deliberation when /plan is used (true/false, default: true)",
-      "sensitive": false
-    },
-    "enable_teams": {
-      "description": "Enable agent teams for specialist input during deliberation (true/false, default: true)",
-      "sensitive": false
-    },
-    "max_specialists_per_side": {
-      "description": "Maximum specialist agents per side (default: 3)",
-      "sensitive": false
-    }
-  }
+  "version": "1.1.0"
 }
